@@ -1,16 +1,31 @@
 import streamlit as st
 import os
-from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
 import tempfile
+
+# Try different import approaches for deployment
+try:
+    from langchain_community.document_loaders import PyPDFLoader
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+    from langchain_community.vectorstores import FAISS
+except ImportError:
+    try:
+        from langchain.document_loaders import PyPDFLoader
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+        from langchain.embeddings import HuggingFaceEmbeddings
+        from langchain.vectorstores import FAISS
+    except ImportError:
+        st.error("Required packages not installed. Please check requirements.txt")
+        st.stop()
+
+# Configure page
 st.set_page_config(
     page_title="PDF Q&A Chatbot",
     page_icon="📚",
     layout="wide"
 )
 
+# Enhanced CSS
 st.markdown("""
 <style>
 .stApp {
@@ -79,7 +94,6 @@ st.markdown("""
     border-left: 5px solid #ff4757 !important;
 }
 
-/* Make all text white */
 .stMarkdown, .stText, p, div {
     color: white !important;
 }
@@ -98,7 +112,11 @@ st.markdown("""
 
 @st.cache_resource
 def load_embeddings():
-    return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    try:
+        return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    except Exception as e:
+        st.error(f"Error loading embeddings: {str(e)}")
+        return None
 
 def process_pdf(uploaded_file):
     try:
@@ -110,10 +128,15 @@ def process_pdf(uploaded_file):
         # Load and process PDF
         loader = PyPDFLoader(tmp_file_path)
         documents = loader.load()
-        os.unlink(tmp_file_path)
+        
+        # Clean up temp file
+        try:
+            os.unlink(tmp_file_path)
+        except:
+            pass
         
         if not documents:
-            return None, "PDF could not be read"
+            return None, "PDF could not be read or is empty"
         
         # Split text
         text_splitter = RecursiveCharacterTextSplitter(
@@ -124,16 +147,19 @@ def process_pdf(uploaded_file):
         
         # Create embeddings and vector store
         embeddings = load_embeddings()
+        if embeddings is None:
+            return None, "Failed to load embeddings model"
+            
         vectorstore = FAISS.from_documents(docs, embeddings)
         
-        return vectorstore, f"✅ Successfully processed {len(documents)} pages!"
+        return vectorstore, f"✅ Successfully processed {len(documents)} pages with {len(docs)} chunks!"
         
     except Exception as e:
-        return None, f"❌ Error: {str(e)}"
+        return None, f"❌ Error processing PDF: {str(e)}"
 
 def main():
     # Title
-    st.markdown('<h1 class="main-title">📚 PDF Question-Answering Chatbot</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-title">📚 RAG-based PDF Chatbot</h1>', unsafe_allow_html=True)
     
     # Initialize session state
     if 'vectorstore' not in st.session_state:
@@ -143,31 +169,44 @@ def main():
     
     # Sidebar
     with st.sidebar:
-        st.header("📋 Project Info")
-        st.write("**Features:**")
-        st.write("- PDF Upload & Processing")
-        st.write("- AI-powered Q&A")
-        st.write("- Vector Search")
-        st.write("- Real-time Results")
+        st.markdown("### 📋 Project Info")
+        st.markdown("""
+        **🚀 Features:**
+        - 📄 PDF Upload & Processing
+        - 🤖 AI-powered Q&A
+        - 🔍 Vector Search (FAISS)
+        - ⚡ Real-time Results
         
-        st.write("**Tech Stack:**")
-        st.write("- Streamlit")
-        st.write("- LangChain")
-        st.write("- FAISS")
-        st.write("- HuggingFace")
+        **🛠️ Tech Stack:**
+        - 🌟 Streamlit
+        - 🔗 LangChain
+        - 📊 FAISS Vector DB
+        - 🤗 HuggingFace Transformers
+        
+        **💡 How to use:**
+        1. Upload your PDF file
+        2. Click 'Process PDF'
+        3. Ask questions about content
+        4. Get intelligent answers!
+        """)
     
     # Main content
-    col1, col2 = st.columns([2, 1])
+    st.markdown("### 📄 Upload Your PDF Document")
+    
+    col1, col2 = st.columns([3, 1])
     
     with col1:
-        st.subheader("📄 Upload PDF")
-        uploaded_file = st.file_uploader("Choose PDF file", type="pdf")
+        uploaded_file = st.file_uploader(
+            "Choose a PDF file to analyze", 
+            type="pdf",
+            help="Upload any PDF document to start asking questions"
+        )
     
     with col2:
-        st.write("")  
-        st.write("")  
-        if uploaded_file and st.button("Process PDF", key="process_btn"):
-            with st.spinner("Processing..."):
+        st.write("")
+        st.write("")
+        if uploaded_file and st.button("🚀 Process PDF", key="process_btn"):
+            with st.spinner("🔄 Processing your PDF..."):
                 vectorstore, message = process_pdf(uploaded_file)
                 if vectorstore:
                     st.session_state.vectorstore = vectorstore
@@ -177,47 +216,76 @@ def main():
     
     # Q&A Section
     if st.session_state.vectorstore:
-        st.subheader("💬 Ask Questions")
+        st.markdown("---")
+        st.markdown("### 💬 Ask Questions About Your PDF")
         
-        # Input
-        question = st.text_input("Enter your question:", key="question_input")
+        question = st.text_input(
+            "What would you like to know?",
+            key="question_input",
+            placeholder="e.g., What is the main topic discussed?"
+        )
         
-        if st.button("Ask Question", key="ask_btn") and question:
-            try:
-                # Search
-                docs = st.session_state.vectorstore.similarity_search(question, k=3)
-                
-                if docs:
-                    st.session_state.messages.append({"role": "user", "content": question})
-                    
-                    answer = ""
-                    for i, doc in enumerate(docs, 1):
-                        answer += f"**Result {i}:**\n{doc.page_content[:500]}...\n\n"
-                    
-                    st.session_state.messages.append({"role": "assistant", "content": answer})
-                else:
-                    st.warning("No relevant information found!")
-                    
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            if st.button("🔍 Ask Question", key="ask_btn") and question:
+                try:
+                    with st.spinner("🤔 Searching..."):
+                        docs = st.session_state.vectorstore.similarity_search(question, k=3)
+                        
+                        if docs:
+                            st.session_state.messages.append({"role": "user", "content": question})
+                            
+                            answer = "**📖 Found relevant information:**\n\n"
+                            for i, doc in enumerate(docs, 1):
+                                content = doc.page_content.strip()
+                                if len(content) > 300:
+                                    content = content[:300] + "..."
+                                answer += f"**Source {i}:**\n{content}\n\n"
+                            
+                            st.session_state.messages.append({"role": "assistant", "content": answer})
+                        else:
+                            st.warning("🔍 No relevant information found!")
+                            
+                except Exception as e:
+                    st.error(f"❌ Search error: {str(e)}")
         
-        # Display messages
-        if st.session_state.messages:
-            st.subheader("📋 Chat History")
-            for msg in st.session_state.messages:
-                if msg["role"] == "user":
-                    st.info(f"🙋 You: {msg['content']}")
-                else:
-                    st.success("🤖 AI Assistant:")
-                    st.write(msg["content"])
-            
-            # Clear button
-            if st.button("Clear History", key="clear_btn"):
+        with col2:
+            if st.button("🗑️ Clear Chat", key="clear_btn") and st.session_state.messages:
                 st.session_state.messages = []
                 st.rerun()
+        
+        # Display chat history
+        if st.session_state.messages:
+            st.markdown("---")
+            st.markdown("### 💭 Chat History")
+            
+            for msg in st.session_state.messages:
+                if msg["role"] == "user":
+                    st.markdown(f"""
+                    <div style="background: rgba(52, 152, 219, 0.2); border-left: 4px solid #3498db; padding: 1rem; border-radius: 10px; margin: 0.5rem 0;">
+                        <strong>🙋‍♀️ You:</strong> {msg['content']}
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div style="background: rgba(46, 204, 113, 0.2); border-left: 4px solid #2ecc71; padding: 1rem; border-radius: 10px; margin: 0.5rem 0;">
+                        <strong>🤖 AI Assistant:</strong><br>
+                        {msg['content'].replace('**', '<strong>').replace('**', '</strong>')}
+                    </div>
+                    """, unsafe_allow_html=True)
     
     else:
-        st.info("👆 Please upload a PDF file to start asking questions!")
+        st.markdown("---")
+        st.info("👆 **Getting Started:** Upload a PDF file to begin!")
+        
+        st.markdown("""
+        ### 💡 Example Questions You Can Ask:
+        - What is the main topic of this document?
+        - Can you summarize the key points?
+        - What are the important findings?
+        - Who are the main people mentioned?
+        - What conclusions are drawn?
+        """)
 
 if __name__ == "__main__":
     main()
